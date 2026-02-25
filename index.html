@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Watson Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3e;
+      --text: #e2e8f0;
+      --muted: #7c85a2;
+      --green: #34d399;
+      --red: #f87171;
+      --amber: #fbbf24;
+      --blue: #60a5fa;
+      --radius: 12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    header h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    header .subtitle {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .header-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .filter-group {
+      display: flex;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .filter-btn {
+      background: none;
+      border: none;
+      border-right: 1px solid var(--border);
+      color: var(--muted);
+      padding: 0.5rem 0.9rem;
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: background 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+    .filter-btn:last-child { border-right: none; }
+    .filter-btn:hover { background: var(--border); color: var(--text); }
+    .filter-btn.active {
+      background: var(--blue);
+      color: #0f1117;
+      font-weight: 600;
+    }
+
+    .refresh-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      transition: background 0.15s;
+    }
+    .refresh-btn:hover { background: var(--border); }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem 1.5rem;
+    }
+
+    .card .label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .card .value {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+
+    .card .sub {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.4rem;
+    }
+
+    .positive { color: var(--green); }
+    .negative { color: var(--red); }
+    .neutral  { color: var(--blue); }
+    .warn     { color: var(--amber); }
+
+    .chart-area {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .chart-area h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 1.25rem;
+      color: var(--text);
+    }
+
+    .chart-wrapper {
+      position: relative;
+      height: 280px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    thead th {
+      text-align: left;
+      padding: 0.6rem 1rem;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+
+    tbody tr:hover { background: rgba(255,255,255,0.03); }
+    tbody tr:last-child { border-bottom: none; }
+
+    tbody td {
+      padding: 0.75rem 1rem;
+      vertical-align: middle;
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 0.2rem 0.5rem;
+      border-radius: 99px;
+    }
+
+    .badge-green { background: rgba(52,211,153,0.15); color: var(--green); }
+    .badge-red   { background: rgba(248,113,113,0.15); color: var(--red); }
+    .badge-amber { background: rgba(251,191,36,0.15);  color: var(--amber); }
+
+    .bar-cell { width: 140px; }
+    .bar-track {
+      background: var(--border);
+      border-radius: 99px;
+      height: 6px;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 6px;
+      border-radius: 99px;
+      transition: width 0.4s;
+    }
+
+    #loading {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 40vh;
+      font-size: 1rem;
+      color: var(--muted);
+    }
+
+    #main { display: none; }
+  </style>
+</head>
+<body>
+
+<div id="loading">Loading watson data…</div>
+
+<div id="main">
+  <header>
+    <div>
+      <h1>Watson Dashboard</h1>
+      <div class="subtitle">40h/week tracking</div>
+    </div>
+    <div class="header-right">
+      <div class="filter-group">
+        <button class="filter-btn active" data-weeks="1"  onclick="setFilter(1)">This week</button>
+        <button class="filter-btn"        data-weeks="2"  onclick="setFilter(2)">2 weeks</button>
+        <button class="filter-btn"        data-weeks="4"  onclick="setFilter(4)">4 weeks</button>
+        <button class="filter-btn"        data-weeks="13" onclick="setFilter(13)">3 months</button>
+      </div>
+      <button class="refresh-btn" onclick="loadData()">↻ Refresh</button>
+    </div>
+  </header>
+
+  <div class="cards">
+    <div class="card">
+      <div class="label">This week</div>
+      <div class="value neutral" id="cur-hours">—</div>
+      <div class="sub" id="cur-sub">of 40h target</div>
+    </div>
+    <div class="card">
+      <div class="label">Net balance</div>
+      <div class="value" id="net-balance">—</div>
+      <div class="sub" id="net-sub">across completed weeks</div>
+    </div>
+    <div class="card">
+      <div class="label">Total overtime</div>
+      <div class="value positive" id="total-overtime">—</div>
+      <div class="sub" id="ot-sub">hours over 40h</div>
+    </div>
+    <div class="card">
+      <div class="label">Total undertime</div>
+      <div class="value negative" id="total-undertime">—</div>
+      <div class="sub" id="ut-sub">hours under 40h</div>
+    </div>
+  </div>
+
+  <div class="chart-area">
+    <h2 id="chart-title">Weekly hours</h2>
+    <div class="chart-wrapper">
+      <canvas id="weekChart"></canvas>
+    </div>
+  </div>
+
+  <div class="chart-area">
+    <h2>Week-by-week breakdown</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Week</th>
+          <th>Hours</th>
+          <th>Delta</th>
+          <th>Status</th>
+          <th class="bar-cell">Progress</th>
+        </tr>
+      </thead>
+      <tbody id="week-table"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let chartInstance = null;
+let allWeeks = null;
+let activeFilter = 1;
+
+const FILTER_LABELS = {
+  1: 'This week',
+  2: 'Last 2 weeks',
+  4: 'Last 4 weeks',
+  13: 'Last 3 months',
+};
+
+function setFilter(weeks) {
+  activeFilter = weeks;
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.classList.toggle('active', Number(btn.dataset.weeks) === weeks);
+  });
+  if (allWeeks) applyFilter();
+}
+
+function applyFilter() {
+  const sliced = allWeeks.slice(-activeFilter);
+  const summary = computeSummary(sliced);
+  document.getElementById('chart-title').textContent =
+    'Weekly hours \u2014 ' + FILTER_LABELS[activeFilter];
+  renderSummaryCards(summary);
+  if (activeFilter === 1) {
+    const currentWeek = allWeeks.find(w => w.is_current);
+    renderDailyChart(currentWeek ? currentWeek.days : []);
+  } else {
+    renderWeeklyChart(sliced);
+  }
+  renderTable(sliced);
+}
+
+function computeSummary(weeks) {
+  const completed = weeks.filter(w => !w.is_current);
+  const tracked   = completed.filter(w => w.hours > 0);
+  const total_overtime   = tracked.filter(w => w.delta > 0).reduce((a, w) => a + w.delta, 0);
+  const total_undertime  = tracked.filter(w => w.delta < 0).reduce((a, w) => a + w.delta, 0);
+  const net_balance      = tracked.reduce((a, w) => a + w.delta, 0);
+  const current_week     = weeks.find(w => w.is_current) || null;
+  return {
+    total_overtime_hours:  Math.round(total_overtime  * 100) / 100,
+    total_undertime_hours: Math.round(total_undertime * 100) / 100,
+    net_balance_hours:     Math.round(net_balance     * 100) / 100,
+    current_week,
+    weeks_analyzed: tracked.length,
+  };
+}
+
+function fmtHours(h) {
+  const sign = h < 0 ? '−' : '';
+  const abs = Math.abs(h);
+  const hh = Math.floor(abs);
+  const mm = Math.round((abs - hh) * 60);
+  return `${sign}${hh}h ${mm.toString().padStart(2,'0')}m`;
+}
+
+function weekLabel(isoDate) {
+  const d = new Date(isoDate);
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
+
+async function loadData() {
+  try {
+    const res = await fetch('/api/data');
+    const { weeks } = await res.json();
+    allWeeks = weeks;
+    applyFilter();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('main').style.display = 'block';
+  } catch (e) {
+    document.getElementById('loading').textContent = 'Failed to load data. Is the server running?';
+  }
+}
+
+function renderSummaryCards(s) {
+  const cur = s.current_week;
+  if (cur) {
+    document.getElementById('cur-hours').textContent = fmtHours(cur.hours);
+    const pct = Math.round((cur.hours / cur.target) * 100);
+    document.getElementById('cur-sub').textContent = `${pct}% of 40h target`;
+  }
+
+  const net = s.net_balance_hours;
+  const netEl = document.getElementById('net-balance');
+  netEl.textContent = fmtHours(net);
+  netEl.className = 'value ' + (net >= 0 ? 'positive' : 'negative');
+  document.getElementById('net-sub').textContent =
+    `across ${s.weeks_analyzed} completed weeks`;
+
+  document.getElementById('total-overtime').textContent =
+    '+' + fmtHours(s.total_overtime_hours);
+  document.getElementById('ot-sub').textContent =
+    `${s.weeks_analyzed} weeks reviewed`;
+
+  document.getElementById('total-undertime').textContent =
+    '−' + fmtHours(Math.abs(s.total_undertime_hours));
+}
+
+function chartOptions(tooltipCb) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#7c85a2', font: { size: 12 } } },
+      tooltip: { callbacks: { label: tooltipCb } },
+    },
+    scales: {
+      x: {
+        ticks: { color: '#7c85a2', font: { size: 11 } },
+        grid:  { color: 'rgba(255,255,255,0.04)' },
+      },
+      y: {
+        ticks: { color: '#7c85a2', font: { size: 11 }, callback: v => v + 'h' },
+        grid:  { color: 'rgba(255,255,255,0.04)' },
+      },
+    },
+  };
+}
+
+function renderDailyChart(days) {
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+  if (!days || days.length === 0) return;
+
+  const labels = days.map(d => d.name.slice(0, 3));
+  const hours  = days.map(d => d.is_future ? null : d.hours);
+  const colors = days.map(d => {
+    if (d.is_future)  return 'rgba(255,255,255,0.06)';
+    if (d.is_today)   return 'rgba(96,165,250,0.85)';
+    return d.hours >= d.target ? 'rgba(52,211,153,0.75)' : 'rgba(248,113,113,0.75)';
+  });
+
+  const ctx = document.getElementById('weekChart').getContext('2d');
+  chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Hours worked',
+          data: hours,
+          backgroundColor: colors,
+          borderRadius: 4,
+          borderSkipped: false,
+        },
+        {
+          label: '8h target',
+          data: days.map(d => d.target),
+          type: 'line',
+          borderColor: 'rgba(251,191,36,0.6)',
+          borderWidth: 2,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          fill: false,
+        },
+      ],
+    },
+    options: chartOptions(ctx => {
+      if (ctx.dataset.type === 'line') return '8h target';
+      const d = days[ctx.dataIndex];
+      if (d.is_future) return 'No data yet';
+      const delta = d.hours - d.target;
+      const sign = delta >= 0 ? '+' : '';
+      return [
+        `Worked: ${fmtHours(ctx.raw)}`,
+        `Delta: ${sign}${fmtHours(delta)}`,
+      ];
+    }),
+  });
+}
+
+function renderWeeklyChart(weeks) {
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+
+  const labels = weeks.map(w => weekLabel(w.week_start));
+  const hours  = weeks.map(w => w.hours);
+  const colors = weeks.map(w => {
+    if (w.is_current) return 'rgba(96,165,250,0.85)';
+    return w.delta >= 0 ? 'rgba(52,211,153,0.75)' : 'rgba(248,113,113,0.75)';
+  });
+
+  const ctx = document.getElementById('weekChart').getContext('2d');
+  chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Hours worked',
+          data: hours,
+          backgroundColor: colors,
+          borderRadius: 4,
+          borderSkipped: false,
+        },
+        {
+          label: '40h target',
+          data: weeks.map(() => 40),
+          type: 'line',
+          borderColor: 'rgba(251,191,36,0.6)',
+          borderWidth: 2,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          fill: false,
+        },
+      ],
+    },
+    options: chartOptions(ctx => {
+      if (ctx.dataset.type === 'line') return '40h target';
+      const w = weeks[ctx.dataIndex];
+      const delta = w.delta;
+      const sign = delta >= 0 ? '+' : '';
+      return [
+        `Worked: ${fmtHours(ctx.raw)}`,
+        `Delta: ${sign}${fmtHours(delta)}`,
+      ];
+    }),
+  });
+}
+
+function renderTable(weeks) {
+  const tbody = document.getElementById('week-table');
+  tbody.innerHTML = '';
+  const reversed = [...weeks].reverse();
+  for (const w of reversed) {
+    const tr = document.createElement('tr');
+    const pct = Math.min((w.hours / w.target) * 100, 140);
+    const fill = Math.min(pct, 100);
+    const overPct = pct > 100 ? pct - 100 : 0;
+
+    let badgeClass, badgeText;
+    if (w.is_current) {
+      badgeClass = 'badge-amber'; badgeText = 'Current';
+    } else if (w.delta >= 0) {
+      badgeClass = 'badge-green'; badgeText = 'Over';
+    } else {
+      badgeClass = 'badge-red';   badgeText = 'Under';
+    }
+
+    const deltaSign = w.delta >= 0 ? '+' : '';
+    const deltaColor = w.delta >= 0 ? 'positive' : 'negative';
+    const barColor = w.is_current ? '#60a5fa'
+                   : w.delta >= 0 ? '#34d399' : '#f87171';
+
+    tr.innerHTML = `
+      <td>${weekLabel(w.week_start)} – ${weekLabel(w.week_end)}</td>
+      <td><strong>${fmtHours(w.hours)}</strong></td>
+      <td class="${w.is_current ? 'neutral' : deltaColor}">${deltaSign}${fmtHours(w.delta)}</td>
+      <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+      <td class="bar-cell">
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${fill}%;background:${barColor}"></div>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+loadData();
+</script>
+</body>
+</html>
