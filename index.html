@@ -253,6 +253,56 @@
       color: var(--text);
     }
 
+    .timeline-header {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 0.35rem;
+      flex-wrap: wrap;
+    }
+
+    .timeline-header h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin: 0;
+    }
+
+    .timeline-date-input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.8rem;
+      padding: 0.25rem 0.5rem;
+      cursor: pointer;
+      outline: none;
+      color-scheme: dark;
+    }
+
+    .timeline-date-input:focus {
+      border-color: var(--blue);
+    }
+
+    .timeline-today-btn {
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 0.75rem;
+      padding: 0.25rem 0.55rem;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+
+    .timeline-today-btn:hover {
+      background: var(--border);
+      color: var(--text);
+    }
+
+    .timeline-today-btn.hidden { display: none; }
+
     .timeline-meta {
       font-size: 0.8rem;
       color: var(--muted);
@@ -397,7 +447,11 @@
 
   <div class="main-row">
     <div class="timeline-area" id="today-timeline" style="display:none">
-      <h2>Today's sessions</h2>
+      <div class="timeline-header">
+        <h2 id="timeline-title">Today's sessions</h2>
+        <input type="date" id="timeline-date" class="timeline-date-input" />
+        <button class="timeline-today-btn hidden" id="timeline-today-btn" onclick="resetTimelineToToday()">↩ Today</button>
+      </div>
       <div class="timeline-meta" id="timeline-meta"></div>
       <div class="timeline-track-wrap" id="timeline-track"></div>
       <div class="timeline-axis" id="timeline-axis"></div>
@@ -691,7 +745,6 @@ function renderTable(weeks) {
 }
 
 loadData();
-startTodayPoller();
 
 // ── Today timeline ─────────────────────────────────────────────────────────
 
@@ -722,7 +775,7 @@ function parseLocalTime(isoStr) {
   return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
 }
 
-function renderTodayTimeline(data) {
+function renderTodayTimeline(data, isToday = true) {
   const area = document.getElementById('today-timeline');
   if (!data.sessions || data.sessions.length === 0) {
     area.style.display = 'none';
@@ -737,7 +790,7 @@ function renderTodayTimeline(data) {
   const stopHours  = sessions.map(s => parseLocalTime(s.stop));
   const nowHour    = new Date().getHours() + new Date().getMinutes() / 60;
   const axisStart  = Math.floor(Math.min(...startHours, 8));
-  const axisEnd    = Math.ceil(Math.max(...stopHours, nowHour, axisStart + 1));
+  const axisEnd    = Math.ceil(Math.max(...stopHours, isToday ? nowHour : 0, axisStart + 1));
   const axisSpan   = axisEnd - axisStart;
 
   // meta line
@@ -792,18 +845,57 @@ function renderTodayTimeline(data) {
 // ── Today poller ────────────────────────────────────────────────────────────
 
 let notificationFired = false;
+let pollerInterval = null;
+
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function initDatePicker() {
+  const input = document.getElementById('timeline-date');
+  input.value = todayISO();
+  input.max   = todayISO();
+  input.addEventListener('change', () => {
+    const val = input.value;
+    const isToday = val === todayISO();
+    document.getElementById('timeline-today-btn').classList.toggle('hidden', isToday);
+    fetchAndRenderDay(val, isToday);
+    // pause auto-poll when viewing a past date
+    clearInterval(pollerInterval);
+    if (isToday) pollerInterval = setInterval(pollToday, 60_000);
+  });
+}
+
+function resetTimelineToToday() {
+  const input = document.getElementById('timeline-date');
+  input.value = todayISO();
+  document.getElementById('timeline-today-btn').classList.add('hidden');
+  fetchAndRenderDay(todayISO(), true);
+  clearInterval(pollerInterval);
+  pollerInterval = setInterval(pollToday, 60_000);
+}
+
+async function fetchAndRenderDay(dateStr, isToday) {
+  try {
+    const res = await fetch(`/api/today?date=${dateStr}`);
+    const data = await res.json();
+    const d = new Date(dateStr + 'T00:00:00');
+    const label = isToday ? "Today's sessions" : d.toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'short' });
+    document.getElementById('timeline-title').textContent = label;
+    renderTodayTimeline(data, isToday);
+    if (isToday) {
+      if (data.target_reached && !notificationFired) {
+        notificationFired = true;
+        fireNotification(data.hours);
+      }
+      if (!data.target_reached) notificationFired = false;
+    }
+  } catch (_) {}
+}
 
 async function pollToday() {
-  try {
-    const res = await fetch('/api/today');
-    const data = await res.json();
-    renderTodayTimeline(data);
-    if (data.target_reached && !notificationFired) {
-      notificationFired = true;
-      fireNotification(data.hours);
-    }
-    if (!data.target_reached) notificationFired = false;
-  } catch (_) {}
+  await fetchAndRenderDay(todayISO(), true);
 }
 
 function fireNotification(hours) {
@@ -817,9 +909,13 @@ function fireNotification(hours) {
 
 function startTodayPoller() {
   if ('Notification' in window) Notification.requestPermission();
+  initDatePicker();
   pollToday();
-  setInterval(pollToday, 60_000);
+  pollerInterval = setInterval(pollToday, 60_000);
 }
+
+loadData();
+startTodayPoller();
 </script>
 </body>
 </html>

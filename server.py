@@ -6,7 +6,7 @@ import subprocess
 import sys
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 TARGET_HOURS_PER_WEEK = 40.0
 
@@ -143,10 +143,12 @@ def build_summary(weeks: list[dict]) -> dict:
     }
 
 
-def build_today() -> dict:
-    """Return today's hours, sessions, and target for the notification poller."""
+def build_today(for_date: date | None = None) -> dict:
+    """Return hours, sessions, and target for a given date (defaults to today)."""
     today = date.today()
-    sessions = fetch_sessions(today, today)
+    target_date = for_date if for_date is not None else today
+    is_today = target_date == today
+    sessions = fetch_sessions(target_date, target_date)
     hours = seconds_for_sessions(sessions) / 3600
     entries = []
     for s in sessions:
@@ -163,7 +165,8 @@ def build_today() -> dict:
             "duration_hours": round(duration, 4),
         })
     return {
-        "date": today.isoformat(),
+        "date": target_date.isoformat(),
+        "is_today": is_today,
         "hours": round(hours, 4),
         "target": DAILY_TARGET,
         "target_reached": hours >= DAILY_TARGET,
@@ -201,7 +204,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             summary = build_summary(weeks)
             self.send_json({"weeks": weeks, "summary": summary})
         elif path == "/api/today":
-            self.send_json(build_today())
+            parsed_qs = parse_qs(parsed.query)
+            for_date = None
+            if "date" in parsed_qs:
+                try:
+                    for_date = date.fromisoformat(parsed_qs["date"][0])
+                except ValueError:
+                    pass
+            self.send_json(build_today(for_date))
         elif path == "/" or path == "/index.html":
             with open("index.html", "r") as f:
                 self.send_html(f.read())
