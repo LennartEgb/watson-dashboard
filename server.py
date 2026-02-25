@@ -143,6 +143,34 @@ def build_summary(weeks: list[dict]) -> dict:
     }
 
 
+def build_today() -> dict:
+    """Return today's hours, sessions, and target for the notification poller."""
+    today = date.today()
+    sessions = fetch_sessions(today, today)
+    hours = seconds_for_sessions(sessions) / 3600
+    entries = []
+    for s in sessions:
+        start_dt = datetime.fromisoformat(s["start"])
+        stop_dt = datetime.fromisoformat(s["stop"])
+        duration = (stop_dt - start_dt).total_seconds() / 3600
+        entries.append({
+            "project": s.get("project", "unknown"),
+            "tags": s.get("tags", []),
+            "start": s["start"],
+            "stop": s["stop"],
+            "start_time": start_dt.strftime("%H:%M"),
+            "stop_time": stop_dt.strftime("%H:%M"),
+            "duration_hours": round(duration, 4),
+        })
+    return {
+        "date": today.isoformat(),
+        "hours": round(hours, 4),
+        "target": DAILY_TARGET,
+        "target_reached": hours >= DAILY_TARGET,
+        "sessions": entries,
+    }
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):  # suppress default logging
         pass
@@ -172,6 +200,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             weeks = build_weekly_data(24)
             summary = build_summary(weeks)
             self.send_json({"weeks": weeks, "summary": summary})
+        elif path == "/api/today":
+            self.send_json(build_today())
         elif path == "/" or path == "/index.html":
             with open("index.html", "r") as f:
                 self.send_html(f.read())

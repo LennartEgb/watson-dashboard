@@ -153,6 +153,25 @@
       height: 280px;
     }
 
+    .main-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .main-row .chart-area,
+    .main-row .timeline-area {
+      margin-bottom: 0;
+      min-width: 0;
+    }
+
+    @media (max-width: 1050px) {
+      .main-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
     table {
       width: 100%;
       border-collapse: collapse;
@@ -217,6 +236,119 @@
     }
 
     #main { display: none; }
+
+    /* Today timeline */
+    .timeline-area {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .timeline-area h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.35rem;
+      color: var(--text);
+    }
+
+    .timeline-meta {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 1.25rem;
+    }
+
+    .timeline-track-wrap {
+      position: relative;
+      height: 36px;
+      background: var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 1.25rem;
+    }
+
+    .timeline-segment {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      border-radius: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: rgba(255,255,255,0.85);
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      cursor: default;
+      transition: filter 0.15s;
+    }
+
+    .timeline-segment:hover { filter: brightness(1.2); }
+
+    .timeline-axis {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: -0.75rem;
+      margin-bottom: 1.25rem;
+      padding: 0 2px;
+    }
+
+    .session-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .session-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.6rem 0.75rem;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+
+    .session-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .session-project {
+      font-weight: 600;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .session-tags {
+      color: var(--muted);
+      font-size: 0.75rem;
+      flex: 1;
+    }
+
+    .session-time {
+      color: var(--muted);
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+
+    .session-dur {
+      font-size: 0.78rem;
+      font-weight: 600;
+      white-space: nowrap;
+      min-width: 52px;
+      text-align: right;
+    }
   </style>
 </head>
 <body>
@@ -263,10 +395,20 @@
     </div>
   </div>
 
-  <div class="chart-area">
-    <h2 id="chart-title">Weekly hours</h2>
-    <div class="chart-wrapper">
-      <canvas id="weekChart"></canvas>
+  <div class="main-row">
+    <div class="timeline-area" id="today-timeline" style="display:none">
+      <h2>Today's sessions</h2>
+      <div class="timeline-meta" id="timeline-meta"></div>
+      <div class="timeline-track-wrap" id="timeline-track"></div>
+      <div class="timeline-axis" id="timeline-axis"></div>
+      <div class="session-list" id="session-list"></div>
+    </div>
+
+    <div class="chart-area">
+      <h2 id="chart-title">Weekly hours</h2>
+      <div class="chart-wrapper">
+        <canvas id="weekChart"></canvas>
+      </div>
     </div>
   </div>
 
@@ -549,6 +691,135 @@ function renderTable(weeks) {
 }
 
 loadData();
+startTodayPoller();
+
+// ── Today timeline ─────────────────────────────────────────────────────────
+
+const PROJECT_COLORS = [
+  '#60a5fa','#34d399','#f87171','#fbbf24','#a78bfa',
+  '#fb923c','#38bdf8','#4ade80','#f472b6','#facc15',
+];
+const projectColorMap = {};
+let colorIndex = 0;
+
+function projectColor(name) {
+  if (!projectColorMap[name]) {
+    projectColorMap[name] = PROJECT_COLORS[colorIndex % PROJECT_COLORS.length];
+    colorIndex++;
+  }
+  return projectColorMap[name];
+}
+
+function fmtDuration(hours) {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+function parseLocalTime(isoStr) {
+  const d = new Date(isoStr);
+  return d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+}
+
+function renderTodayTimeline(data) {
+  const area = document.getElementById('today-timeline');
+  if (!data.sessions || data.sessions.length === 0) {
+    area.style.display = 'none';
+    return;
+  }
+  area.style.display = '';
+
+  const sessions = data.sessions;
+
+  // axis window: earliest session start rounded down to hour, or 08:00; end = latest stop or now
+  const startHours = sessions.map(s => parseLocalTime(s.start));
+  const stopHours  = sessions.map(s => parseLocalTime(s.stop));
+  const nowHour    = new Date().getHours() + new Date().getMinutes() / 60;
+  const axisStart  = Math.floor(Math.min(...startHours, 8));
+  const axisEnd    = Math.ceil(Math.max(...stopHours, nowHour, axisStart + 1));
+  const axisSpan   = axisEnd - axisStart;
+
+  // meta line
+  const totalDur = sessions.reduce((a, s) => a + s.duration_hours, 0);
+  document.getElementById('timeline-meta').textContent =
+    `${sessions.length} session${sessions.length !== 1 ? 's' : ''} · ${fmtDuration(totalDur)} total · ${fmtDuration(data.target)} target`;
+
+  // track segments
+  const track = document.getElementById('timeline-track');
+  track.innerHTML = '';
+  for (const s of sessions) {
+    const left = ((parseLocalTime(s.start) - axisStart) / axisSpan) * 100;
+    const width = (s.duration_hours / axisSpan) * 100;
+    const color = projectColor(s.project);
+    const seg = document.createElement('div');
+    seg.className = 'timeline-segment';
+    seg.style.left  = left.toFixed(2) + '%';
+    seg.style.width = Math.max(width, 0.4).toFixed(2) + '%';
+    seg.style.background = color;
+    seg.title = `${s.project}${s.tags.length ? ' [' + s.tags.join(', ') + ']' : ''}\n${s.start_time}–${s.stop_time} (${fmtDuration(s.duration_hours)})`;
+    if (width > 3) seg.textContent = s.project;
+    track.appendChild(seg);
+  }
+
+  // axis labels
+  const axis = document.getElementById('timeline-axis');
+  axis.innerHTML = '';
+  for (let h = axisStart; h <= axisEnd; h++) {
+    const label = document.createElement('span');
+    label.textContent = `${h.toString().padStart(2,'0')}:00`;
+    axis.appendChild(label);
+  }
+
+  // session rows
+  const list = document.getElementById('session-list');
+  list.innerHTML = '';
+  for (const s of sessions) {
+    const color = projectColor(s.project);
+    const row = document.createElement('div');
+    row.className = 'session-row';
+    row.innerHTML = `
+      <div class="session-dot" style="background:${color}"></div>
+      <div class="session-project">${s.project}</div>
+      <div class="session-tags">${s.tags.length ? s.tags.join(', ') : ''}</div>
+      <div class="session-time">${s.start_time} – ${s.stop_time}</div>
+      <div class="session-dur" style="color:${color}">${fmtDuration(s.duration_hours)}</div>
+    `;
+    list.appendChild(row);
+  }
+}
+
+// ── Today poller ────────────────────────────────────────────────────────────
+
+let notificationFired = false;
+
+async function pollToday() {
+  try {
+    const res = await fetch('/api/today');
+    const data = await res.json();
+    renderTodayTimeline(data);
+    if (data.target_reached && !notificationFired) {
+      notificationFired = true;
+      fireNotification(data.hours);
+    }
+    if (!data.target_reached) notificationFired = false;
+  } catch (_) {}
+}
+
+function fireNotification(hours) {
+  if (Notification.permission === 'granted') {
+    new Notification('Watson — 8h reached 🎉', {
+      body: `You've worked ${fmtHours(hours)} today.`,
+      icon: '',
+    });
+  }
+}
+
+function startTodayPoller() {
+  if ('Notification' in window) Notification.requestPermission();
+  pollToday();
+  setInterval(pollToday, 60_000);
+}
 </script>
 </body>
 </html>
