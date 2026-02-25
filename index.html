@@ -93,6 +93,86 @@
     }
     .refresh-btn:hover { background: var(--border); }
 
+    .settings-wrap {
+      position: relative;
+    }
+
+    .settings-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      transition: background 0.15s;
+    }
+    .settings-btn:hover { background: var(--border); }
+
+    .settings-popover {
+      display: none;
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      min-width: 220px;
+      z-index: 100;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+
+    .settings-popover.open { display: block; }
+
+    .settings-popover label {
+      display: block;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .settings-row {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    .settings-input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.9rem;
+      padding: 0.35rem 0.6rem;
+      width: 80px;
+      outline: none;
+    }
+
+    .settings-input:focus { border-color: var(--blue); }
+
+    .settings-save {
+      background: var(--blue);
+      border: none;
+      border-radius: 6px;
+      color: #0f1117;
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 0.35rem 0.75rem;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .settings-save:hover { opacity: 0.85; }
+
+    .settings-hint {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-top: 0.5rem;
+    }
+
     .cards {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -409,7 +489,7 @@
   <header>
     <div>
       <h1>Watson Dashboard</h1>
-      <div class="subtitle">40h/week tracking</div>
+      <div class="subtitle" id="main-subtitle">40h/week tracking</div>
     </div>
     <div class="header-right">
       <div class="filter-group">
@@ -419,6 +499,17 @@
         <button class="filter-btn"        data-weeks="13" onclick="setFilter(13)">3 months</button>
       </div>
       <button class="refresh-btn" onclick="loadData()">↻ Refresh</button>
+      <div class="settings-wrap">
+        <button class="settings-btn" onclick="toggleSettings()" title="Settings">⚙</button>
+        <div class="settings-popover" id="settings-popover">
+          <label>Weekly target (hours)</label>
+          <div class="settings-row">
+            <input type="number" class="settings-input" id="target-input" min="1" max="168" step="1" />
+            <button class="settings-save" onclick="saveTarget()">Save</button>
+          </div>
+          <div class="settings-hint" id="settings-hint"></div>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -559,6 +650,54 @@ async function loadData() {
     document.getElementById('loading').textContent = 'Failed to load data. Is the server running?';
   }
 }
+
+// ── Settings ────────────────────────────────────────────────────────────────
+
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/config');
+    const cfg = await res.json();
+    document.getElementById('target-input').value = cfg.target_hours_per_week;
+    updateSettingsHint(cfg.target_hours_per_week);
+  } catch (_) {}
+}
+
+function updateSettingsHint(h) {
+  document.getElementById('settings-hint').textContent =
+    `${h}h/week · ${(h / 5).toFixed(1)}h/day`;
+  document.getElementById('main-subtitle').textContent = `${h}h/week tracking`;
+}
+
+function toggleSettings() {
+  const pop = document.getElementById('settings-popover');
+  pop.classList.toggle('open');
+}
+
+async function saveTarget() {
+  const input = document.getElementById('target-input');
+  const val = parseFloat(input.value);
+  if (!val || val <= 0 || val > 168) return;
+  try {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_hours_per_week: val }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      updateSettingsHint(val);
+      document.getElementById('settings-popover').classList.remove('open');
+      loadData();
+    }
+  } catch (_) {}
+}
+
+document.addEventListener('click', e => {
+  const wrap = document.querySelector('.settings-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    document.getElementById('settings-popover').classList.remove('open');
+  }
+});
 
 function renderSummaryCards(s) {
   const cur = s.current_week;
@@ -915,6 +1054,7 @@ function startTodayPoller() {
 }
 
 loadData();
+loadSettings();
 startTodayPoller();
 </script>
 </body>

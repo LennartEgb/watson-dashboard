@@ -2,13 +2,37 @@
 """Watson Dashboard - HTTP server that reads watson time tracking data."""
 
 import json
+import os
 import subprocess
 import sys
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 
-TARGET_HOURS_PER_WEEK = 40.0
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+DEFAULT_TARGET = 40.0
+
+
+def load_config() -> dict:
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"target_hours_per_week": DEFAULT_TARGET}
+
+
+def save_config(cfg: dict) -> None:
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+
+def get_target() -> float:
+    return float(load_config().get("target_hours_per_week", DEFAULT_TARGET))
+
+
+TARGET_HOURS_PER_WEEK = get_target()
 
 
 def get_week_bounds(offset: int = 0):
@@ -51,12 +75,14 @@ def seconds_for_sessions(sessions: list[dict]) -> float:
     return total
 
 
-DAILY_TARGET = TARGET_HOURS_PER_WEEK / 5  # 8h per day
+def daily_target() -> float:
+    return get_target() / 5
 
 
 def build_daily_breakdown(monday: date, today: date) -> list[dict]:
     """Return per-day data for Mon-Fri of the current week, skipping 0h past days."""
     day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+    dt = daily_target()
     days = []
     for i in range(5):
         day = monday + timedelta(days=i)
@@ -65,7 +91,7 @@ def build_daily_breakdown(monday: date, today: date) -> list[dict]:
                 "date": day.isoformat(),
                 "name": day_names[i],
                 "hours": None,
-                "target": round(DAILY_TARGET, 2),
+                "target": round(dt, 2),
                 "is_today": False,
                 "is_future": True,
                 "is_off": False,
@@ -78,7 +104,7 @@ def build_daily_breakdown(monday: date, today: date) -> list[dict]:
                 "date": day.isoformat(),
                 "name": day_names[i],
                 "hours": round(hours, 2),
-                "target": round(DAILY_TARGET, 2),
+                "target": round(dt, 2),
                 "is_today": day == today,
                 "is_future": False,
                 "is_off": is_off,
@@ -92,12 +118,11 @@ def effective_weekly_target(monday: date, end: date, sessions: list[dict]) -> fl
     for s in sessions:
         day = datetime.fromisoformat(s["start"]).date()
         worked_days.add(day)
-    # Count only Mon-Fri within the range that had sessions
     count = sum(
         1 for d in worked_days
         if d >= monday and d <= end and d.weekday() < 5
     )
-    return count * DAILY_TARGET
+    return count * daily_target()
 
 
 def build_weekly_data(num_weeks: int = 12) -> list[dict]:
@@ -168,8 +193,8 @@ def build_today(for_date: date | None = None) -> dict:
         "date": target_date.isoformat(),
         "is_today": is_today,
         "hours": round(hours, 4),
-        "target": DAILY_TARGET,
-        "target_reached": hours >= DAILY_TARGET,
+        "target": daily_target(),
+        "target_reached": hours >= daily_target(),
         "sessions": entries,
     }
 
@@ -212,9 +237,39 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 except ValueError:
                     pass
             self.send_json(build_today(for_date))
+        elif path == "/api/config":
+            cfg = load_config()
+            self.send_json({"target_hours_per_week": cfg.get("target_hours_per_week", DEFAULT_TARGET)})
         elif path == "/" or path == "/index.html":
             with open("index.html", "r") as f:
                 self.send_html(f.read())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/config":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            try:
+                data = json.loads(body)
+                target = float(data["target_hours_per_week"])
+                if target <= 0 or target > 168:
+                    raise ValueError
+                cfg = load_config()
+                cfg["target_hours_per_week"] = target
+                save_config(cfg)
+                self.send_json({"ok": True, "target_hours_per_week": target})
+            except (KeyError, ValueError, json.JSONDecodeError):
+                self.send_json({"ok": False, "error": "invalid value"}, status=400)
         else:
             self.send_response(404)
             self.end_headers()
