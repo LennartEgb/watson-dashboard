@@ -51,10 +51,12 @@ def seconds_for_sessions(sessions: list[dict]) -> float:
     return total
 
 
+DAILY_TARGET = TARGET_HOURS_PER_WEEK / 5  # 8h per day
+
+
 def build_daily_breakdown(monday: date, today: date) -> list[dict]:
-    """Return per-day hours for Mon–Fri of the current week."""
+    """Return per-day data for Mon-Fri of the current week, skipping 0h past days."""
     day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
-    daily_target = TARGET_HOURS_PER_WEEK / 5
     days = []
     for i in range(5):
         day = monday + timedelta(days=i)
@@ -63,22 +65,39 @@ def build_daily_breakdown(monday: date, today: date) -> list[dict]:
                 "date": day.isoformat(),
                 "name": day_names[i],
                 "hours": None,
-                "target": round(daily_target, 2),
+                "target": round(DAILY_TARGET, 2),
                 "is_today": False,
                 "is_future": True,
+                "is_off": False,
             })
         else:
             sessions = fetch_sessions(day, day)
             hours = seconds_for_sessions(sessions) / 3600
+            is_off = hours == 0 and not (day == today)
             days.append({
                 "date": day.isoformat(),
                 "name": day_names[i],
                 "hours": round(hours, 2),
-                "target": round(daily_target, 2),
+                "target": round(DAILY_TARGET, 2),
                 "is_today": day == today,
                 "is_future": False,
+                "is_off": is_off,
             })
     return days
+
+
+def effective_weekly_target(monday: date, end: date, sessions: list[dict]) -> float:
+    """Target adjusted for days with no tracked time (holidays/vacation)."""
+    worked_days = set()
+    for s in sessions:
+        day = datetime.fromisoformat(s["start"]).date()
+        worked_days.add(day)
+    # Count only Mon-Fri within the range that had sessions
+    count = sum(
+        1 for d in worked_days
+        if d >= monday and d <= end and d.weekday() < 5
+    )
+    return count * DAILY_TARGET
 
 
 def build_weekly_data(num_weeks: int = 12) -> list[dict]:
@@ -89,17 +108,16 @@ def build_weekly_data(num_weeks: int = 12) -> list[dict]:
         monday, sunday = get_week_bounds(offset)
         end = min(sunday, today)
         sessions = fetch_sessions(monday, end)
-        seconds = seconds_for_sessions(sessions)
-        hours = seconds / 3600
+        hours = seconds_for_sessions(sessions) / 3600
         is_current = offset == 0
-        weekly_target = TARGET_HOURS_PER_WEEK
-        delta = hours - weekly_target
+        target = effective_weekly_target(monday, end, sessions)
+        delta = round(hours - target, 2) if target > 0 else 0.0
         entry: dict = {
             "week_start": monday.isoformat(),
             "week_end": sunday.isoformat(),
             "hours": round(hours, 2),
-            "target": weekly_target,
-            "delta": round(delta, 2),
+            "target": round(target, 2),
+            "delta": delta,
             "is_current": is_current,
             "days_elapsed": today.weekday() + 1 if is_current else 5,
         }

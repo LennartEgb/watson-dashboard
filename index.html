@@ -369,7 +369,7 @@ function renderSummaryCards(s) {
   if (cur) {
     document.getElementById('cur-hours').textContent = fmtHours(cur.hours);
     const pct = Math.round((cur.hours / cur.target) * 100);
-    document.getElementById('cur-sub').textContent = `${pct}% of 40h target`;
+    document.getElementById('cur-sub').textContent = `${pct}% of ${fmtHours(cur.target)} target`;
   }
 
   const net = s.net_balance_hours;
@@ -413,9 +413,10 @@ function renderDailyChart(days) {
   if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
   if (!days || days.length === 0) return;
 
-  const labels = days.map(d => d.name.slice(0, 3));
-  const hours  = days.map(d => d.is_future ? null : d.hours);
-  const colors = days.map(d => {
+  const visible = days.filter(d => !d.is_off);
+  const labels = visible.map(d => d.name.slice(0, 3));
+  const hours  = visible.map(d => d.is_future ? null : d.hours);
+  const colors = visible.map(d => {
     if (d.is_future)  return 'rgba(255,255,255,0.06)';
     if (d.is_today)   return 'rgba(96,165,250,0.85)';
     return d.hours >= d.target ? 'rgba(52,211,153,0.75)' : 'rgba(248,113,113,0.75)';
@@ -436,7 +437,7 @@ function renderDailyChart(days) {
         },
         {
           label: '8h target',
-          data: days.map(d => d.target),
+          data: visible.map(d => d.is_future ? null : d.target),
           type: 'line',
           borderColor: 'rgba(251,191,36,0.6)',
           borderWidth: 2,
@@ -448,7 +449,7 @@ function renderDailyChart(days) {
     },
     options: chartOptions(ctx => {
       if (ctx.dataset.type === 'line') return '8h target';
-      const d = days[ctx.dataIndex];
+      const d = visible[ctx.dataIndex];
       if (d.is_future) return 'No data yet';
       const delta = d.hours - d.target;
       const sign = delta >= 0 ? '+' : '';
