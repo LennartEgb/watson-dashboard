@@ -3,6 +3,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import date, datetime, timedelta
@@ -168,6 +169,35 @@ def build_summary(weeks: list[dict]) -> dict:
     }
 
 
+def build_active_session() -> dict:
+    """Return the currently running watson session, or active=False."""
+    result = subprocess.run(["watson", "status"], capture_output=True, text=True)
+    if result.returncode != 0 or not result.stdout.strip():
+        return {"active": False}
+    m = re.match(r"Project (.+?) started .+ \((.+?)\)", result.stdout.strip())
+    if not m:
+        return {"active": False}
+    project_part = m.group(1)
+    # project may include tags in brackets e.g. "myproject [tag1, tag2]"
+    pm = re.match(r"(.+?)\s*\[(.+)\]$", project_part)
+    if pm:
+        project = pm.group(1).strip()
+        tags = [t.strip() for t in pm.group(2).split(",")]
+    else:
+        project = project_part.strip()
+        tags = []
+    start_dt = datetime.strptime(m.group(2), "%Y.%m.%d %H:%M:%S%z")
+    elapsed = (datetime.now(start_dt.tzinfo) - start_dt).total_seconds()
+    return {
+        "active": True,
+        "project": project,
+        "tags": tags,
+        "start": start_dt.isoformat(),
+        "start_time": start_dt.strftime("%H:%M"),
+        "elapsed_seconds": round(elapsed),
+    }
+
+
 def build_today(for_date: date | None = None) -> dict:
     """Return hours, sessions, and target for a given date (defaults to today)."""
     today = date.today()
@@ -237,6 +267,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 except ValueError:
                     pass
             self.send_json(build_today(for_date))
+        elif path == "/api/status":
+            self.send_json(build_active_session())
         elif path == "/api/config":
             cfg = load_config()
             self.send_json({"target_hours_per_week": cfg.get("target_hours_per_week", DEFAULT_TARGET)})

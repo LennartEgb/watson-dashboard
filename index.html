@@ -479,6 +479,32 @@
       min-width: 52px;
       text-align: right;
     }
+    .active-indicator {
+      display: block;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(52,211,153,0.1);
+      border: 1px solid rgba(52,211,153,0.3);
+      border-radius: 99px;
+      padding: 0.5rem;
+      font-size: 0.0rem;
+      color: var(--green);
+    }
+    .active-indicator.visible { display: flex; }
+    .active-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 1.8s ease-in-out infinite;
+      flex-shrink: 0;
+      display: block;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.4; transform: scale(0.85); }
+    }
+    .active-project { font-weight: 600; }
+    .active-elapsed { color: rgba(52,211,153,0.7); margin-left: 0.15rem; }
   </style>
 </head>
 <body>
@@ -492,6 +518,11 @@
       <div class="subtitle" id="main-subtitle">40h/week tracking</div>
     </div>
     <div class="header-right">
+      <div class="active-indicator" id="active-indicator">
+        <div class="active-dot"></div>
+        <span class="active-project" id="active-project"></span>
+        <span class="active-elapsed" id="active-elapsed"></span>
+      </div>
       <div class="filter-group">
         <button class="filter-btn active" data-weeks="1"  onclick="setFilter(1)">This week</button>
         <button class="filter-btn"        data-weeks="2"  onclick="setFilter(2)">2 weeks</button>
@@ -1037,6 +1068,30 @@ async function pollToday() {
   await fetchAndRenderDay(todayISO(), true);
 }
 
+function fmtElapsed(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+async function pollStatus() {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+    const el = document.getElementById('active-indicator');
+    if (data.active) {
+      document.getElementById('active-project').textContent =
+        data.tags.length ? `${data.project} · ${data.tags.join(', ')}` : data.project;
+      document.getElementById('active-elapsed').textContent =
+        fmtElapsed(data.elapsed_seconds);
+      el.style.visibility = "visible"
+    } else {
+      el.style.visibility = "hidden";
+    }
+  } catch (_) {}
+}
+
 function fireNotification(hours) {
   if (Notification.permission === 'granted') {
     new Notification('Watson — 8h reached 🎉', {
@@ -1050,7 +1105,9 @@ function startTodayPoller() {
   if ('Notification' in window) Notification.requestPermission();
   initDatePicker();
   pollToday();
+  pollStatus();
   pollerInterval = setInterval(pollToday, 60_000);
+  setInterval(pollStatus, 30_000);
 }
 
 loadData();
