@@ -524,10 +524,10 @@
         <span class="active-elapsed" id="active-elapsed"></span>
       </div>
       <div class="filter-group">
-        <button class="filter-btn active" data-weeks="1"  onclick="setFilter(1)">This week</button>
-        <button class="filter-btn"        data-weeks="2"  onclick="setFilter(2)">2 weeks</button>
+        <button class="filter-btn active" data-weeks="2"  onclick="setFilter(2)">2 weeks</button>
         <button class="filter-btn"        data-weeks="4"  onclick="setFilter(4)">4 weeks</button>
         <button class="filter-btn"        data-weeks="13" onclick="setFilter(13)">3 months</button>
+        <button class="filter-btn"        data-weeks="0"  onclick="setFilter(0)">All time</button>
       </div>
       <button class="refresh-btn" onclick="loadData()">↻ Refresh</button>
       <div class="settings-wrap">
@@ -608,13 +608,13 @@
 <script>
 let chartInstance = null;
 let allWeeks = null;
-let activeFilter = 1;
+let activeFilter = 2;
 
 const FILTER_LABELS = {
-  1: 'This week',
   2: 'Last 2 weeks',
   4: 'Last 4 weeks',
   13: 'Last 3 months',
+  0: 'All time',
 };
 
 function setFilter(weeks) {
@@ -626,17 +626,12 @@ function setFilter(weeks) {
 }
 
 function applyFilter() {
-  const sliced = allWeeks.slice(-activeFilter);
+  const sliced = activeFilter === 0 ? allWeeks : allWeeks.slice(-activeFilter);
   const summary = computeSummary(sliced);
   document.getElementById('chart-title').textContent =
     'Weekly hours \u2014 ' + FILTER_LABELS[activeFilter];
   renderSummaryCards(summary);
-  if (activeFilter === 1) {
-    const currentWeek = allWeeks.find(w => w.is_current);
-    renderDailyChart(currentWeek ? currentWeek.days : []);
-  } else {
-    renderWeeklyChart(sliced);
-  }
+  renderWeeklyChart(sliced);
   renderTable(sliced);
 }
 
