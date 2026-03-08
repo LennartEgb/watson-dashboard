@@ -1052,7 +1052,7 @@ async function fetchAndRenderDay(dateStr, isToday) {
     if (isToday) {
       if (data.target_reached && !notificationFired) {
         notificationFired = true;
-        fireNotification(data.hours);
+        fireNotification(data.hours, data.target);
       }
       if (!data.target_reached) notificationFired = false;
     }
@@ -1087,9 +1087,9 @@ async function pollStatus() {
   } catch (_) {}
 }
 
-function fireNotification(hours) {
+function fireNotification(hours, target) {
   if (Notification.permission === 'granted') {
-    new Notification('Watson — 8h reached 🎉', {
+    new Notification(`Watson — ${fmtHours(target)} reached 🎉`, {
       body: `You've worked ${fmtHours(hours)} today.`,
       icon: '',
     });
