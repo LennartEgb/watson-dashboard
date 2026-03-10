@@ -1108,6 +1108,13 @@ function startTodayPoller() {
 loadData();
 loadSettings();
 startTodayPoller();
+
+document.addEventListener("keydown", function(event) {
+  if (event.key == 'r') {
+    loadData();
+  }
+});
+
 </script>
 </body>
 </html>
