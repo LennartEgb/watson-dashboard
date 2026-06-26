@@ -3,15 +3,43 @@
 
 import json
 import os
+import queue
 import re
 import subprocess
 import sys
+import threading
+import time
 from datetime import date, datetime, timedelta
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 DEFAULT_TARGET = 40.0
+
+DEFAULT_FRAMES_PATH = "~/Library/Application Support/watson/frames"
+
+_sse_lock = threading.Lock()
+_sse_clients: list[queue.Queue] = []
+
+
+def get_frames_path() -> str:
+    cfg = load_config()
+    return os.path.expanduser(cfg.get("watson_frames_path", DEFAULT_FRAMES_PATH))
+
+
+def _file_watcher():
+    last_mtime = None
+    while True:
+        try:
+            mtime = os.path.getmtime(get_frames_path())
+            if last_mtime is not None and mtime != last_mtime:
+                with _sse_lock:
+                    for q in _sse_clients:
+                        q.put("change")
+            last_mtime = mtime
+        except OSError:
+            pass
+        time.sleep(2)
 
 
 def load_config() -> dict:
@@ -271,7 +299,36 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self.send_json(build_active_session())
         elif path == "/api/config":
             cfg = load_config()
-            self.send_json({"target_hours_per_week": cfg.get("target_hours_per_week", DEFAULT_TARGET)})
+            self.send_json({
+                "target_hours_per_week": cfg.get("target_hours_per_week", DEFAULT_TARGET),
+                "watson_frames_path": cfg.get("watson_frames_path", DEFAULT_FRAMES_PATH),
+            })
+        elif path == "/api/events":
+            q: queue.Queue = queue.Queue()
+            with _sse_lock:
+                _sse_clients.append(q)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                self.wfile.write(b": connected\n\n")
+                self.wfile.flush()
+                while True:
+                    try:
+                        event = q.get(timeout=15)
+                        self.wfile.write(f"event: {event}\ndata: {{}}\n\n".encode())
+                        self.wfile.flush()
+                    except queue.Empty:
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                with _sse_lock:
+                    _sse_clients.remove(q)
         elif path == "/" or path == "/index.html":
             with open("index.html", "r") as f:
                 self.send_html(f.read())
@@ -293,14 +350,24 @@ class DashboardHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(length)
             try:
                 data = json.loads(body)
-                target = float(data["target_hours_per_week"])
-                if target <= 0 or target > 168:
-                    raise ValueError
                 cfg = load_config()
-                cfg["target_hours_per_week"] = target
+                if "target_hours_per_week" in data:
+                    target = float(data["target_hours_per_week"])
+                    if target <= 0 or target > 168:
+                        raise ValueError
+                    cfg["target_hours_per_week"] = target
+                if "watson_frames_path" in data:
+                    path_val = str(data["watson_frames_path"]).strip()
+                    if not path_val:
+                        raise ValueError
+                    cfg["watson_frames_path"] = path_val
+                if not data:
+                    raise ValueError
                 save_config(cfg)
-                self.send_json({"ok": True, "target_hours_per_week": target})
-            except (KeyError, ValueError, json.JSONDecodeError):
+                self.send_json({"ok": True,
+                                "target_hours_per_week": cfg.get("target_hours_per_week", DEFAULT_TARGET),
+                                "watson_frames_path": cfg.get("watson_frames_path", DEFAULT_FRAMES_PATH)})
+            except (ValueError, json.JSONDecodeError):
                 self.send_json({"ok": False, "error": "invalid value"}, status=400)
         else:
             self.send_response(404)
@@ -309,7 +376,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
-    server = HTTPServer(("127.0.0.1", port), DashboardHandler)
+    watcher = threading.Thread(target=_file_watcher, daemon=True)
+    watcher.start()
+    server = ThreadingHTTPServer(("127.0.0.1", port), DashboardHandler)
     print(f"Watson Dashboard → http://localhost:{port}")
     try:
         server.serve_forever()

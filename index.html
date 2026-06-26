@@ -151,6 +151,17 @@
       width: 80px;
       outline: none;
     }
+    .settings-input.wide {
+      width: 100%;
+      font-size: 0.8rem;
+      font-family: monospace;
+      box-sizing: border-box;
+    }
+    .settings-section {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
 
     .settings-input:focus { border-color: var(--blue); }
 
@@ -539,6 +550,15 @@
             <button class="settings-save" onclick="saveTarget()">Save</button>
           </div>
           <div class="settings-hint" id="settings-hint"></div>
+          <div class="settings-section">
+            <label>Watson frames path</label>
+            <input type="text" class="settings-input wide" id="frames-path-input" spellcheck="false" />
+            <div class="settings-hint" style="margin-bottom:0.5rem">
+              macOS: <code>~/Library/Application Support/watson/frames</code><br>
+              Linux: <code>~/.config/watson/frames</code>
+            </div>
+            <button class="settings-save" onclick="saveFramesPath()">Save</button>
+          </div>
         </div>
       </div>
     </div>
@@ -685,6 +705,7 @@ async function loadSettings() {
     const cfg = await res.json();
     document.getElementById('target-input').value = cfg.target_hours_per_week;
     updateSettingsHint(cfg.target_hours_per_week);
+    document.getElementById('frames-path-input').value = cfg.watson_frames_path;
   } catch (_) {}
 }
 
@@ -714,6 +735,23 @@ async function saveTarget() {
       updateSettingsHint(val);
       document.getElementById('settings-popover').classList.remove('open');
       loadData();
+    }
+  } catch (_) {}
+}
+
+async function saveFramesPath() {
+  const input = document.getElementById('frames-path-input');
+  const val = input.value.trim();
+  if (!val) return;
+  try {
+    const res = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ watson_frames_path: val }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById('settings-popover').classList.remove('open');
     }
   } catch (_) {}
 }
@@ -1105,9 +1143,23 @@ function startTodayPoller() {
   setInterval(pollStatus, 30_000);
 }
 
+function connectSSE() {
+  const es = new EventSource('/api/events');
+  es.addEventListener('change', () => {
+    loadData();
+    pollToday();
+    pollStatus();
+  });
+  es.onerror = () => {
+    es.close();
+    setTimeout(connectSSE, 5000);
+  };
+}
+
 loadData();
 loadSettings();
 startTodayPoller();
+connectSSE();
 
 document.addEventListener("keydown", function(event) {
   if (event.key == 'r') {
